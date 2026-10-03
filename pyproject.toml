@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biaoge"
+version = "0.16.0"
+description = "中文优先的 Excel/CSV 命令行瑞士军刀：合并/拆分/去重/转格式/摸底/VLOOKUP/关联合并/分组汇总/透视表/逆透视/筛选/清洗/体检报告/文件夹监控汇总/两表对比/终端出图/模板批量生成/智能排序/转置"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["excel", "csv", "cli", "batch", "chinese", "openpyxl"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+dependencies = ["openpyxl>=3.0"]
+
+[project.optional-dependencies]
+chart = ["matplotlib>=3.5"]
+template = ["python-docx>=0.8.11"]
+
+[project.scripts]
+biaoge = "biaoge:main"
+
+[project.urls]
+Homepage = "https://github.com/mourinho2026/biaoge-cli"
+Repository = "https://github.com/mourinho2026/biaoge-cli"
+Issues = "https://github.com/mourinho2026/biaoge-cli/issues"
+
+[tool.setuptools]
+py-modules = ["biaoge"]
+
+[tool.setuptools.package-dir]
+"" = "src"
