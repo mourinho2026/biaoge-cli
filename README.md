@@ -1,12 +1,12 @@
 # biaoge — Excel/CSV 命令行瑞士军刀
 
-> 20 个命令覆盖表格日常：SQL 直查、合并拆分、透视表、VLOOKUP 平替、数据体检、文件监控、终端出图……
+> 21 个命令覆盖表格日常：SQL 直查、合并拆分、透视表、VLOOKUP 平替、数据体检、文件监控、终端出图……
 > 不会 pandas 也能 3 分钟上手，纯本地离线，数据不出电脑。
 
 [![PyPI](https://img.shields.io/pypi/v/biaoge)](https://pypi.org/project/biaoge/)
 [![Python](https://img.shields.io/pypi/pyversions/biaoge)](https://pypi.org/project/biaoge/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-143%20passed-brightgreen)](./tests/)
+[![Tests](https://img.shields.io/badge/tests-159%20passed-brightgreen)](./tests/)
 
 ---
 
@@ -29,7 +29,7 @@ biaoge sql "SELECT 部门, SUM(金额) FROM data GROUP BY 部门" -i 数据.xlsx
 biaoge report 客户表.xlsx -o 体检报告.md
 ```
 
-## 20 个命令一览
+## 21 个命令一览
 
 | # | 命令 | 一句话用途 | 典型场景 |
 |---|------|-----------|---------|
@@ -53,6 +53,7 @@ biaoge report 客户表.xlsx -o 体检报告.md
 | 18 | `fill` | 空值向下填充 | 合并单元格拆分+前向填充 |
 | 19 | `sort` | 智能排序 | 数值感知+自然排序+空值沉底+Top-N |
 | 20 | `transpose` | 转置表格（行列互换） | 矩阵转置，支持无表头/index-col |
+| 21 | `mask` | 数据脱敏（个保法合规） | 手机号/身份证/姓名/邮箱/银行卡/地址/哈希/删列 |
 
 完整参数：`biaoge <命令> --help`
 
@@ -119,7 +120,8 @@ biaoge chart -i 地区汇总.xlsx --type bar --x 地区 --y 总额 --title "各�
 ## 路线图
 
 - [x] v0.1-v0.16：20 个命令全部上线（merge/split/dedup/convert/summary/join/groupby/pivot/unpivot/filter/clean/report/watch/diff/sql/chart/template/fill/sort/transpose）
-- [ ] v0.17：打包为独立 exe（免装 Python）
+- [x] v0.17：数据脱敏 mask 命令（9 种模式，个保法合规刚需）
+- [ ] v0.18：打包为独立 exe（免装 Python）
 - [ ] v0.18：插件系统（自定义命令）
 - [ ] v0.19：交互式 TUI 模式
 

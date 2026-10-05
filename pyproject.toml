@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "biaoge"
-version = "0.16.0"
-description = "中文优先的 Excel/CSV 命令行瑞士军刀：合并/拆分/去重/转格式/摸底/VLOOKUP/关联合并/分组汇总/透视表/逆透视/筛选/清洗/体检报告/文件夹监控汇总/两表对比/终端出图/模板批量生成/智能排序/转置"
+version = "0.17.0"
+description = "中文优先的 Excel/CSV 命令行瑞士军刀：合并/拆分/去重/转格式/摸底/VLOOKUP/关联合并/分组汇总/透视表/逆透视/筛选/清洗/体检报告/文件夹监控汇总/两表对比/终端出图/模板批量生成/智能排序/转置/数据脱敏"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"

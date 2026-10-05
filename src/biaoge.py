@@ -8,6 +8,7 @@ Excel/CSV 批量处理工具箱
 import argparse
 import csv
 import datetime
+import hashlib
 import math
 import os
 import re
@@ -2012,7 +2013,8 @@ def _resolve_col_indices(headers, col_specs):
             indices.append(idx)
         else:
             if spec not in headers:
-                raise ValueError(f"错误：找不到列「{spec}」，可用列：{", ".join(str(h) for h in headers)}")
+                avail = ", ".join(str(h) for h in headers)
+                raise ValueError(f"错误：找不到列「{spec}」，可用列：{avail}")
             indices.append(headers.index(spec))
     return indices
 
@@ -2164,7 +2166,8 @@ def _fill_xlsx(input_path, args, col_specs):
         if args.group_by:
             gb = args.group_by
             if gb not in headers:
-                print(f"错误：找不到分组列「{gb}」，可用列：{", ".join(str(h) for h in headers)}")
+                avail = ", ".join(str(h) for h in headers)
+                print(f"错误：找不到分组列「{gb}」，可用列：{avail}")
                 wb.close()
                 return 1
             group_by_idx = headers.index(gb)
@@ -2241,8 +2244,10 @@ def _fill_csv(input_path, args, col_specs):
     if args.group_by:
         gb = args.group_by
         if gb not in headers:
-            print(f"错误：找不到分组列「{gb}」，可用列：{", ".join(str(h) for h in headers)}")
-            return 1
+            avail = ", ".join(str(h) for h in headers)
+            print(f"错误：找不到分组列「{gb}」，可用列：{avail}")
+            avail = ", ".join(str(h) for h in headers)
+            print(f"错误：找不到分组列「{gb}」，可用列：{avail}")
         group_by_idx = headers.index(gb)
         if group_by_idx not in fill_indices:
             fill_indices.append(group_by_idx)
@@ -2637,9 +2642,232 @@ def cmd_transpose(args):
     return 0
 
 
+
+# ---------- mask：数据脱敏 ----------
+_COMPOUND_SURNAMES = {
+    "欧阳", "太史", "端木", "上官", "司马", "东方", "独孤", "南宫",
+    "万俟", "闻人", "夏侯", "诸葛", "尉迟", "公羊", "赫连", "澹台",
+    "皇甫", "宗政", "濮阳", "公冶", "太叔", "申屠", "公孙", "慕容",
+    "仲孙", "钟离", "长孙", "宇文", "司徒", "鲜于", "司空", "闾丘",
+    "子车", "亓官", "司寇", "巫马", "公西", "颛孙", "壤驷", "公良",
+    "漆雕", "乐正", "宰父", "谷梁", "拓跋", "夹谷", "轩辕", "令狐",
+    "段干", "百里", "呼延", "东郭", "南门", "羊舌", "微生", "公户",
+    "公玉", "公仪", "梁丘", "公仲", "公上", "公门", "公山", "公坚",
+    "左丘", "公伯", "西门", "公祖", "第五", "公乘", "贯丘", "公皙",
+    "南荣", "东里", "东宫", "仲长", "子书", "子桑", "即墨", "达奚",
+    "褚师",
+}
+_ADDRESS_PREFIXES = (
+    "北京", "天津", "上海", "重庆",
+    "河北", "山西", "辽宁", "吉林", "黑龙江",
+    "江苏", "浙江", "安徽", "福建", "江西", "山东",
+    "河南", "湖北", "湖南", "广东", "海南",
+    "四川", "贵州", "云南", "陕西", "甘肃",
+    "青海", "台湾",
+    "内蒙古", "广西", "西藏", "宁夏", "新疆",
+    "香港", "澳门",
+)
+
+
+def _mask_phone(v):
+    s = str(v).strip()
+    if not s:
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        s = str(int(v)) if v == int(v) else str(v)
+    if re.fullmatch(r"1[3-9]\d{9}", s):
+        return s[:3] + "****" + s[7:]
+    return v
+
+
+def _mask_idcard(v):
+    s = str(v).strip()
+    if not s:
+        return v
+    if re.fullmatch(r"\d{17}[\dXx]", s):
+        return s[:6] + "*" * 8 + s[-4:]
+    if re.fullmatch(r"\d{15}", s):
+        return s[:6] + "*" * 3 + s[-3:]
+    return v
+
+
+def _mask_name(v):
+    s = str(v).strip()
+    if not s:
+        return v
+    if not any("\u4e00" <= c <= "\u9fff" for c in s):
+        return v
+    if len(s) >= 3 and s[:2] in _COMPOUND_SURNAMES:
+        return s[:2] + "*" * (len(s) - 2)
+    if len(s) >= 2 and "\u4e00" <= s[0] <= "\u9fff":
+        return s[0] + "*" * (len(s) - 1)
+    if len(s) == 1 and "\u4e00" <= s[0] <= "\u9fff":
+        return s + "*"
+    return v
+
+
+def _mask_email(v):
+    s = str(v).strip()
+    if not s or "@" not in s:
+        return v
+    local, domain = s.rsplit("@", 1)
+    if not local:
+        return v
+    return local[0] + "***@" + domain
+
+
+def _mask_bank(v):
+    s = re.sub(r"[\s-]", "", str(v).strip())
+    if not s:
+        return v
+    if len(s) < 9 or not s.isdigit():
+        return v
+    return s[:4] + " **** **** " + s[-4:]
+
+
+def _mask_address(v):
+    s = str(v).strip()
+    if not s or len(s) < 6:
+        return v
+    prefix_len = 0
+    for pfx in _ADDRESS_PREFIXES:
+        if s.startswith(pfx):
+            prefix_len = len(pfx)
+            # include 市/省/自治区 suffix
+            rest = s[prefix_len:]
+            if rest.startswith("市") or rest.startswith("省"):
+                prefix_len += 1
+            elif rest.startswith("自治区"):
+                prefix_len += 3
+            elif rest.startswith("特别行政区"):
+                prefix_len += 5
+            break
+    if prefix_len == 0:
+        prefix_len = min(3, len(s))
+    detail = s[prefix_len:]
+    if not detail:
+        return v
+    return s[:prefix_len] + "*" * len(detail)
+
+
+def _mask_text(v):
+    s = str(v)
+    if len(s) <= 2:
+        return v
+    return s[0] + "*" * (len(s) - 2) + s[-1]
+
+
+def _mask_hash(v, seed=None):
+    s = str(v)
+    raw = f"{seed}:{s}" if seed is not None else s
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def cmd_mask(args):
+    """数据脱敏（手机号/身份证/姓名/邮箱/银行卡/地址/通用/哈希/删除列）"""
+    VALID_MODES = {"phone", "idcard", "name", "email", "bank", "address", "text", "hash", "drop"}
+    inp = Path(args.input)
+    if not inp.exists():
+        print(f"错误：文件不存在：{inp}")
+        return 1
+    mode = args.mode
+    if mode not in VALID_MODES:
+        print(f"错误：不支持的脱敏模式「{mode}」，可选：{', '.join(sorted(VALID_MODES))}")
+        return 1
+
+    sheet_name = getattr(args, "sheet", None)
+    if sheet_name and inp.suffix.lower() in (".xlsx", ".xlsm"):
+        wb_check = openpyxl.load_workbook(inp, read_only=True)
+        if sheet_name not in wb_check.sheetnames:
+            available = list(wb_check.sheetnames)
+            wb_check.close()
+            print(f"错误：sheet「{sheet_name}」不存在，可选：{', '.join(available)}")
+            return 1
+        wb_check.close()
+
+    headers, rows = _read_sheet(str(inp), sheet_name)
+    if not headers:
+        print("错误：表格为空或无法读取")
+        return 1
+
+    col_specs = [c.strip() for c in args.cols.split(",") if c.strip()]
+    try:
+        col_indices = _resolve_col_indices(headers, col_specs)
+    except ValueError as e:
+        print(str(e))
+        return 1
+
+    seed = getattr(args, "seed", None)
+
+    if mode == "drop":
+        new_headers = [h for i, h in enumerate(headers) if i not in col_indices]
+        new_rows = [[v for i, v in enumerate(r) if i not in col_indices] for r in rows]
+    else:
+        mask_fn = {
+            "phone": lambda v: _mask_phone(v),
+            "idcard": lambda v: _mask_idcard(v),
+            "name": lambda v: _mask_name(v),
+            "email": lambda v: _mask_email(v),
+            "bank": lambda v: _mask_bank(v),
+            "address": lambda v: _mask_address(v),
+            "text": lambda v: _mask_text(v),
+            "hash": lambda v: _mask_hash(v, seed),
+        }[mode]
+        new_headers = list(headers)
+        new_rows = [list(r) for r in rows]
+        for r in new_rows:
+            for ci in col_indices:
+                if ci < len(r):
+                    v = r[ci]
+                    if v is None or (isinstance(v, str) and not v.strip()):
+                        continue
+                    r[ci] = mask_fn(v)
+
+    if getattr(args, "dry_run", False):
+        print(f"脱敏预览（模式：{mode}，列：{', '.join(col_specs)}）：")
+        print()
+        for ci in col_indices:
+            if ci >= len(headers):
+                continue
+            print(f"  列「{headers[ci]}」：")
+            preview_count = 0
+            for r in rows:
+                if preview_count >= 3:
+                    break
+                if ci < len(r):
+                    orig = r[ci]
+                    if orig is None or (isinstance(orig, str) and not orig.strip()):
+                        continue
+                    if mode == "drop":
+                        masked = "(已删除)"
+                    else:
+                        mask_fn_preview = {
+                            "phone": _mask_phone,
+                            "idcard": _mask_idcard,
+                            "name": _mask_name,
+                            "email": _mask_email,
+                            "bank": _mask_bank,
+                            "address": _mask_address,
+                            "text": _mask_text,
+                            "hash": lambda v, s=seed: _mask_hash(v, s),
+                        }[mode]
+                        masked = mask_fn_preview(orig)
+                    print(f"    {orig} → {masked}")
+                    preview_count += 1
+        return 0
+
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        out_path = inp.parent / f"{inp.stem}_masked{inp.suffix}"
+    write_table(out_path, new_headers, new_rows)
+    print(f"已脱敏并保存至：{out_path}")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Excel/CSV 批量处理工具箱（合并/拆分/去重/转换/关联/统计/对比/出图/模板批量生成/空值填充/智能排序/转置）",
+        description="Excel/CSV 批量处理工具箱（合并/拆分/去重/转换/关联/统计/对比/出图/模板批量生成/空值填充/智能排序/转置/脱敏）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""示例：
   合并目录下所有表格：   python excel_tool.py merge ./表格 -o 合并结果.xlsx --source-col
@@ -2662,6 +2890,7 @@ def main():
   拆分合并单元格并分组填充：    python excel_tool.py fill 数据.xlsx --unmerge --group-by 部门 -o 填充后.xlsx
   智能排序（金额降序取前10）：    python excel_tool.py sort 订单表.xlsx --by 金额:desc --limit 10 -o top10.xlsx
   转置表格（行列互换）：            python excel_tool.py transpose 数据.xlsx -o 转置结果.xlsx
+  数据脱敏（手机号/身份证等）：     python excel_tool.py mask 客户表.xlsx --cols 手机号,身份证 --mode phone -o 脱敏.xlsx
 """)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -2843,6 +3072,19 @@ def main():
     p.add_argument("--theme", help="matplotlib 主题名")
     p.add_argument("--sheet", help="xlsx 指定 sheet 名（默认第一个）")
     p.set_defaults(fn=cmd_chart)
+
+
+    p = sub.add_parser("mask", help="数据脱敏（手机号/身份证/姓名/邮箱/银行卡/地址/通用/哈希/删列）")
+    p.add_argument("input", help="输入表格（.xlsx/.csv）")
+    p.add_argument("--cols", required=True, help="脱敏列（逗号分隔，支持列名或 A/B/C 字母）")
+    p.add_argument("--mode", required=True,
+                   choices=["phone", "idcard", "name", "email", "bank", "address", "text", "hash", "drop"],
+                   help="脱敏模式")
+    p.add_argument("--sheet", help="xlsx 指定 sheet 名（默认第一个）")
+    p.add_argument("--seed", type=int, default=None, help="hash 模式的种子值（同 seed 同值同输出）")
+    p.add_argument("--dry-run", action="store_true", help="预览脱敏效果（前 3 行对照表），不写盘")
+    p.add_argument("-o", "--output", default=None, help="输出文件（缺省：<名>_masked.xlsx）")
+    p.set_defaults(fn=cmd_mask)
 
     args = ap.parse_args()
     sys.exit(args.fn(args))

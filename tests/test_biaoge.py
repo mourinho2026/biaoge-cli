@@ -2141,3 +2141,206 @@ def test_transpose_print_preview(tmp_path):
     assert "姓名" in out
     assert "张三" in out
     assert "共 1 行" in out
+
+
+# ---------- mask 数据脱敏 ----------
+
+def _make_mask_csv(path: Path):
+    path.write_text(
+        "手机号,身份证,姓名,邮箱,银行卡,地址,备注\n"
+        "13812345678,110101199001011234,张三,zhangsan@qq.com,6222021234567890123,北京市朝阳区建国路88号,普通文本\n"
+        "13900001111,31010119851215123X,欧阳修文,test@163.com,6222029876543210987,上海市浦东新区张江路100号,测试数据\n"
+        "010-12345678,12345,王,invalid,12345,短,a\n",
+        encoding="utf-8",
+    )
+
+
+def test_mask_phone(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "手机号", "--mode", "phone", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "138****5678" in lines[1]
+    assert "139****1111" in lines[2]
+    assert "010-12345678" in lines[3]  # 固话不误伤
+
+
+def test_mask_idcard(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "身份证", "--mode", "idcard", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "110101********1234" in lines[1]
+    assert "310101********123X" in lines[2]  # 带X身份证
+    assert "12345" in lines[3]  # 非身份证不误伤
+
+
+def test_mask_name(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "姓名", "--mode", "name", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "张*" in lines[1]  # 单姓双字名
+    assert "欧阳**" in lines[2]  # 复姓
+    assert "王*" in lines[3]  # 单字名加*
+
+
+def test_mask_email(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "邮箱", "--mode", "email", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "z***@qq.com" in lines[1]
+    assert "t***@163.com" in lines[2]
+    assert "invalid" in lines[3]  # 无@不误伤
+
+
+def test_mask_bank(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "银行卡", "--mode", "bank", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "6222 **** **** 0123" in lines[1]
+    assert "6222 **** **** 0987" in lines[2]
+    assert "12345" in lines[3]  # 短号不误伤
+
+
+def test_mask_address(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "地址", "--mode", "address", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "北京市" in lines[1] and "***" in lines[1]
+    assert "上海市" in lines[2] and "***" in lines[2]
+    assert "短" in lines[3]  # 短地址不动
+
+
+def test_mask_text(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "备注", "--mode", "text", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "普**本" in lines[1]
+    assert "测**据" in lines[2]
+    assert "a" in lines[3]  # 单字符不动
+
+
+def test_mask_hash_seed_reproducible(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out1 = tmp_path / "out1.csv"
+    out2 = tmp_path / "out2.csv"
+    run("mask", str(src), "--cols", "备注", "--mode", "hash", "--seed", "42", "-o", str(out1))
+    run("mask", str(src), "--cols", "备注", "--mode", "hash", "--seed", "42", "-o", str(out2))
+    assert out1.read_text(encoding="utf-8-sig") == out2.read_text(encoding="utf-8-sig")
+    # 不同 seed 不同输出
+    out3 = tmp_path / "out3.csv"
+    run("mask", str(src), "--cols", "备注", "--mode", "hash", "--seed", "99", "-o", str(out3))
+    assert out1.read_text(encoding="utf-8-sig") != out3.read_text(encoding="utf-8-sig")
+
+
+def test_mask_drop(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "备注", "--mode", "drop", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    headers = lines[0].split(",")
+    assert "备注" not in headers
+    assert len(headers) == 6
+
+
+def test_mask_dry_run(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = run("mask", str(src), "--cols", "手机号", "--mode", "phone", "--dry-run")
+    assert "脱敏预览" in out
+    assert "138****5678" in out
+    assert "13812345678" in out
+
+
+def test_mask_error_file_not_found(tmp_path):
+    out = tmp_path / "out.csv"
+    r = subprocess.run([PY, str(SRC), "mask", str(tmp_path / "nope.csv"), "--cols", "A", "--mode", "phone", "-o", str(out)], capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "不存在" in r.stdout
+
+
+def test_mask_error_col_not_found(tmp_path):
+    src = tmp_path / "data.csv"
+    _make_mask_csv(src)
+    out = tmp_path / "out.csv"
+    r = subprocess.run([PY, str(SRC), "mask", str(src), "--cols", "不存在的列", "--mode", "phone", "-o", str(out)], capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "找不到列" in r.stdout
+
+
+def test_mask_error_sheet_not_found(tmp_path):
+    import openpyxl
+    src = tmp_path / "data.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "数据"
+    ws.append(["姓名", "手机"])
+    ws.append(["张三", "13812345678"])
+    wb.save(src)
+    wb.close()
+    out = tmp_path / "out.xlsx"
+    r = subprocess.run([PY, str(SRC), "mask", str(src), "--cols", "手机", "--mode", "phone", "--sheet", "不存在的sheet", "-o", str(out)], capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "sheet" in r.stdout.lower() or "不存在" in r.stdout
+
+
+def test_mask_xlsx_default_output(tmp_path):
+    import openpyxl
+    src = tmp_path / "客户表.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["姓名", "手机"])
+    ws.append(["张三", "13812345678"])
+    ws.append(["李四", "13900001111"])
+    wb.save(src)
+    wb.close()
+    run("mask", str(src), "--cols", "手机", "--mode", "phone")
+    masked = tmp_path / "客户表_masked.xlsx"
+    assert masked.exists()
+    wb2 = openpyxl.load_workbook(masked)
+    rows = list(wb2.active.values)
+    wb2.close()
+    assert rows[1][1] == "138****5678"
+    assert rows[2][1] == "139****1111"
+
+
+def test_mask_numeric_phone(tmp_path):
+    import openpyxl
+    src = tmp_path / "data.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["手机"])
+    ws.append([13812345678])  # 数字型手机号
+    wb.save(src)
+    wb.close()
+    out = tmp_path / "out.xlsx"
+    run("mask", str(src), "--cols", "手机", "--mode", "phone", "-o", str(out))
+    wb2 = openpyxl.load_workbook(out)
+    rows = list(wb2.active.values)
+    wb2.close()
+    assert rows[1][0] == "138****5678"
+
+
+def test_mask_empty_skip(tmp_path):
+    src = tmp_path / "data.csv"
+    src.write_text("手机,姓名\n13812345678,\n,张三\n", encoding="utf-8")
+    out = tmp_path / "out.csv"
+    run("mask", str(src), "--cols", "手机,姓名", "--mode", "phone", "-o", str(out))
+    lines = out.read_text(encoding="utf-8-sig").strip().split("\n")
+    assert "138****5678" in lines[1]
+    assert lines[1].endswith(",")  # 空姓名保持空
+    assert lines[2].startswith(",")  # 空手机保持空
